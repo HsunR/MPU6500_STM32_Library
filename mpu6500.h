@@ -19,6 +19,9 @@ extern "C" {
 /* For HAL functions and pin definitions */
 #include "main.h"
 
+#define MPU6500_INT_Pin        MPU_INT_Pin
+#define MPU6500_INT_GPIO_Port  MPU_INT_GPIO_Port
+
 /**
  * @brief Initialize the MPU6500 accelerometer and gyroscope    
  * @return HAL_StatusTypeDef HAL_OK on success, error on failure

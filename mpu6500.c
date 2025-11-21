@@ -12,7 +12,7 @@
 #include "mpu6500.h"
 
 /* MPU6500 I2C Address */
-#define MPU6500_ADDR		0x68 // AD0 = 0 -> 0x68 || AD0 = 1 -> 0x69
+#define MPU6500_ADDR		0x69 // AD0 = 0 -> 0x68 || AD0 = 1 -> 0x69
 
 /* MPU6500 Register Addresses */
 #define SELF_TEST_X_GYRO	0x00
@@ -357,7 +357,7 @@ HAL_StatusTypeDef MPU6500_ReadTemp(int16_t *temp){
     uint8_t buffer[2];
 
     // Read 2 bytes starting from TEMP_OUT_H
-    status = HAL_I2C_Mem_Read(&hi2c2, (MPU6500_ADDR << 1), TEMP_OUT_H, I2C_MEMADD_SIZE_8BIT, buffer, 2, HAL_MAX_DELAY);
+    status = HAL_I2C_Mem_Read(&hi2c1, (MPU6500_ADDR << 1), TEMP_OUT_H, I2C_MEMADD_SIZE_8BIT, buffer, 2, HAL_MAX_DELAY);
     if (status != HAL_OK) return status;
 
     // Combine bytes into signed 16-bit integer
