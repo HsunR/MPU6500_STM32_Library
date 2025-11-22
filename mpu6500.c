@@ -11,8 +11,6 @@
 
 #include "mpu6500.h"
 
-/* MPU6500 I2C Address */
-#define MPU6500_ADDR		0x69 // AD0 = 0 -> 0x68 || AD0 = 1 -> 0x69
 
 /* MPU6500 Register Addresses */
 #define SELF_TEST_X_GYRO	0x00
@@ -164,7 +162,7 @@ static inline HAL_StatusTypeDef MPU6500_ConfigureClock(void){
  */
 static inline HAL_StatusTypeDef MPU6500_ConfigureAccel(void){
     HAL_StatusTypeDef status;
-    status = MPU6500_WriteRegister(ACCEL_CONFIG, 0b00001000); // ACCEL_FS_SEL[4:3] = 11 (±16g), bits [2:0] reserved (0)
+    status = MPU6500_WriteRegister(ACCEL_CONFIG, MPU6500_DEFAULT_ACCEL_CONFIG); // ACCEL_FS_SEL[4:3] = 11 (±16g), bits [2:0] reserved (0)
     if(status != HAL_OK) return status;
     status = MPU6500_WriteRegister(ACCEL_CONFIG_2, 0x04); // ACCEL_DLPF_CFG[2:0] = 100 (20Hz, 1kHz)
     if(status != HAL_OK) return status;
@@ -180,7 +178,7 @@ static inline HAL_StatusTypeDef MPU6500_ConfigureAccel(void){
  */
 static inline HAL_StatusTypeDef MPU6500_ConfigureGyro(void){
     HAL_StatusTypeDef status;
-    status = MPU6500_WriteRegister(GYRO_CONFIG, 0b00001000); // GYRO_FS_SEL[1:0] = 11 | FCHOICE_B[1:0] = 00 || Full scale range = ±2000dps
+    status = MPU6500_WriteRegister(GYRO_CONFIG, MPU6500_DEFAULT_GYRO_CONFIG); // GYRO_FS_SEL[1:0] = 11 | FCHOICE_B[1:0] = 00 || Full scale range = ±2000dps
     if(status != HAL_OK) return status;
     status = MPU6500_WriteRegister(CONFIG, 0x04); // DLPF_CFG[2:0] = 100 || Gyroscope low pass filter Bandwidth = 20Hz | Data Rate = 1kHz
     if(status != HAL_OK) return status;
@@ -302,47 +300,65 @@ HAL_StatusTypeDef MPU6500_ReadWhoAmI(uint8_t *whoami){
 
 /**
  * @brief Read accelerometer data from MPU6500
- * @param x Pointer to store X-axis acceleration
- * @param y Pointer to store Y-axis acceleration
- * @param z Pointer to store Z-axis acceleration
+ * @param x Pointer to store X-axis acceleration in g
+ * @param y Pointer to store Y-axis acceleration in g
+ * @param z Pointer to store Z-axis acceleration in g
  * @return HAL_StatusTypeDef HAL_OK on success, error on failure
  * @note Reads 6 bytes starting from ACCEL_XOUT_H register
- *       Data is in 16-bit format, high byte first
+ *       Converts raw data to physical units using configured sensitivity
  */
-HAL_StatusTypeDef MPU6500_ReadAccel(int16_t *x, int16_t *y, int16_t *z){
+HAL_StatusTypeDef MPU6500_ReadAccel(float *x, float *y, float *z){
     HAL_StatusTypeDef status;
     uint8_t buffer[6];  // 6 bytes for data
+    int16_t raw_x, raw_y, raw_z;
+    
     // Read all 6 bytes starting from ACCEL_XOUT_H
     status = HAL_I2C_Mem_Read(&hi2c1, (MPU6500_ADDR << 1), ACCEL_XOUT_H, I2C_MEMADD_SIZE_8BIT, buffer, 6, HAL_MAX_DELAY);
     if(status != HAL_OK) return status;
+    
     // Combine bytes into 16-bit values (high byte first, then low byte)
-    *x = (int16_t)((buffer[0] << 8) | buffer[1]);
-    *y = (int16_t)((buffer[2] << 8) | buffer[3]);
-    *z = (int16_t)((buffer[4] << 8) | buffer[5]);
+    raw_x = (int16_t)((buffer[0] << 8) | buffer[1]);
+    raw_y = (int16_t)((buffer[2] << 8) | buffer[3]);
+    raw_z = (int16_t)((buffer[4] << 8) | buffer[5]);
+    
+    // Convert to physical units (g)
+    *x = (float)raw_x / MPU6500_ACCEL_SENS;
+    *y = (float)raw_y / MPU6500_ACCEL_SENS;
+    *z = (float)raw_z / MPU6500_ACCEL_SENS;
+    
     return HAL_OK;
-}   
+}
 
 /**
  * @brief Read gyroscope data from MPU6500
- * @param x Pointer to store X-axis gyroscope data
- * @param y Pointer to store Y-axis gyroscope data
- * @param z Pointer to store Z-axis gyroscope data
+ * @param x Pointer to store X-axis gyroscope data in degrees per second
+ * @param y Pointer to store Y-axis gyroscope data in degrees per second
+ * @param z Pointer to store Z-axis gyroscope data in degrees per second
  * @return HAL_StatusTypeDef HAL_OK on success, error on failure
  * @note Reads 6 bytes starting from GYRO_XOUT_H register
- *       Data is in 16-bit format, high byte first
+ *       Converts raw data to physical units using configured sensitivity
  */
-HAL_StatusTypeDef MPU6500_ReadGyro(int16_t *x, int16_t *y, int16_t *z){
+HAL_StatusTypeDef MPU6500_ReadGyro(float *x, float *y, float *z){
     HAL_StatusTypeDef status;
     uint8_t buffer[6];  // 6 bytes for data
+    int16_t raw_x, raw_y, raw_z;
+    
     // Read all 6 bytes starting from GYRO_XOUT_H
     status = HAL_I2C_Mem_Read(&hi2c1, (MPU6500_ADDR << 1), GYRO_XOUT_H, I2C_MEMADD_SIZE_8BIT, buffer, 6, HAL_MAX_DELAY);
     if(status != HAL_OK) return status;
+    
     // Combine bytes into 16-bit values (high byte first, then low byte)
-    *x = (int16_t)((buffer[0] << 8) | buffer[1]);
-    *y = (int16_t)((buffer[2] << 8) | buffer[3]);
-    *z = (int16_t)((buffer[4] << 8) | buffer[5]);
+    raw_x = (int16_t)((buffer[0] << 8) | buffer[1]);
+    raw_y = (int16_t)((buffer[2] << 8) | buffer[3]);
+    raw_z = (int16_t)((buffer[4] << 8) | buffer[5]);
+    
+    // Convert to physical units (degrees per second)
+    *x = (float)raw_x / MPU6500_GYRO_SENS;
+    *y = (float)raw_y / MPU6500_GYRO_SENS;
+    *z = (float)raw_z / MPU6500_GYRO_SENS;
+    
     return HAL_OK;
-}       
+}
 
 /**
  * @brief Read temperature data from MPU6500
@@ -398,4 +414,4 @@ HAL_StatusTypeDef MPU6500_WakeUp(void){
     regData &= ~(1 << 6);
     // Write back to PWR_MGMT_1
     return MPU6500_WriteRegister(PWR_MGMT_1, regData);
-}       
+}
