@@ -18,7 +18,8 @@ extern "C" {
 
 /* For HAL functions and pin definitions */
 #include "main.h"
-
+#include <sys/types.h>
+#include <stdio.h>
 /* 陀螺仪满量程选择配置常量 */
 #define MPU6500_GYRO_FS_250DPS     0x00  // ±250°/s
 #define MPU6500_GYRO_FS_500DPS     0x08  // ±500°/s
@@ -79,6 +80,9 @@ extern "C" {
 /* MPU6500 I2C Address */
 #define MPU6500_ADDR		0x69 // AD0 = 0 -> 0x68 || AD0 = 1 -> 0x69
 
+/* Change this according to your I2C handle declared in main.c */
+extern I2C_HandleTypeDef hi2c1; 
+
 /**
  * @brief Initialize the MPU6500 accelerometer and gyroscope    
  * @return HAL_StatusTypeDef HAL_OK on success, error on failure
@@ -106,6 +110,8 @@ HAL_StatusTypeDef MPU6500_DisableDataReadyInterrupts(void);
  */
 HAL_StatusTypeDef MPU6500_ReadWhoAmI(uint8_t *whoami);
 
+
+
 /**
  * @brief Read accelerometer data from MPU6500
  * @param x Pointer to store X-axis acceleration in g
@@ -116,6 +122,16 @@ HAL_StatusTypeDef MPU6500_ReadWhoAmI(uint8_t *whoami);
  *       Converts raw data to physical units using configured sensitivity
  */
 HAL_StatusTypeDef MPU6500_ReadAccel(float *x, float *y, float *z);
+/**
+ * @brief Read raw accelerometer data from MPU6500
+ * @param x Pointer to store X-axis raw acceleration data
+ * @param y Pointer to store Y-axis raw acceleration data
+ * @param z Pointer to store Z-axis raw acceleration data
+ * @return HAL_StatusTypeDef HAL_OK on success, error on failure
+ * @note Reads 6 bytes starting from ACCEL_XOUT_H register
+ *       Data is in 16-bit format, high byte first
+ */
+HAL_StatusTypeDef MPU6500_ReadRawAccel(int16_t *x, int16_t *y, int16_t *z);
 
 /**
  * @brief Read gyroscope data from MPU6500
@@ -150,6 +166,22 @@ HAL_StatusTypeDef MPU6500_Sleep(void);
  * @note Clears SLEEP bit (bit 6) in PWR_MGMT_1 register
  */
 HAL_StatusTypeDef MPU6500_WakeUp(void);
+
+/**
+ * @brief Initialize and calibrate the offset of MPU6500
+ * @param samples Number of samples to collect for calibration
+ * @return HAL_StatusTypeDef HAL_OK on success, error on failure
+ * @note This function collects multiple samples, calculates the average
+ *       offset, and writes the offset values to the appropriate registers.
+ *       Make sure the sensor is stationary during calibration.
+ */
+HAL_StatusTypeDef MPU6500_InitOffsetCalibration(uint32_t samples);
+
+/**
+ * @brief 打印MPU6500的偏移校准值
+ * @return HAL_StatusTypeDef HAL_OK on success, error on failure
+ */
+extern HAL_StatusTypeDef MPU6500_PrintOffsets(void);
 
 #ifdef __cplusplus
 }

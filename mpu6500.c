@@ -11,7 +11,6 @@
 
 #include "mpu6500.h"
 
-
 /* MPU6500 Register Addresses */
 #define SELF_TEST_X_GYRO	0x00
 #define SELF_TEST_Y_GYRO	0x01
@@ -114,8 +113,8 @@
 #define ZA_OFFSET_H			0x7D
 #define ZA_OFFSET_L			0x7E
 
-/* Change this according to your I2C handle declared in main.c */
-extern I2C_HandleTypeDef hi2c1; 
+int16_t accel_offset[3];
+int16_t gyro_offset[3];
 
 /**
  * @brief Write a single byte to an MPU6500 register
@@ -298,6 +297,41 @@ HAL_StatusTypeDef MPU6500_ReadWhoAmI(uint8_t *whoami){
     return MPU6500_ReadRegister(WHO_AM_I, whoami);
 }
 
+HAL_StatusTypeDef MPU6500_ReadRawAccel(int16_t *x, int16_t *y, int16_t *z){
+    HAL_StatusTypeDef status;
+    uint8_t buffer[6];  // 6 bytes for data
+    // Read all 6 bytes starting from ACCEL_XOUT_H
+    status = HAL_I2C_Mem_Read(&hi2c1, (MPU6500_ADDR << 1), ACCEL_XOUT_H, I2C_MEMADD_SIZE_8BIT, buffer, 6, HAL_MAX_DELAY);
+    if(status != HAL_OK) return status;
+    // Combine bytes into 16-bit values (high byte first, then low byte)
+    *x = (int16_t)((buffer[0] << 8) | buffer[1]);
+    *y = (int16_t)((buffer[2] << 8) | buffer[3]);
+    *z = (int16_t)((buffer[4] << 8) | buffer[5]);
+    return HAL_OK;
+}   
+
+/**
+ * @brief Read gyroscope data from MPU6500
+ * @param x Pointer to store X-axis gyroscope data
+ * @param y Pointer to store Y-axis gyroscope data
+ * @param z Pointer to store Z-axis gyroscope data
+ * @return HAL_StatusTypeDef HAL_OK on success, error on failure
+ * @note Reads 6 bytes starting from GYRO_XOUT_H register
+ *       Data is in 16-bit format, high byte first
+ */
+HAL_StatusTypeDef MPU6500_ReadRawGyro(int16_t *x, int16_t *y, int16_t *z){
+    HAL_StatusTypeDef status;
+    uint8_t buffer[6];  // 6 bytes for data
+    // Read all 6 bytes starting from GYRO_XOUT_H
+    status = HAL_I2C_Mem_Read(&hi2c1, (MPU6500_ADDR << 1), GYRO_XOUT_H, I2C_MEMADD_SIZE_8BIT, buffer, 6, HAL_MAX_DELAY);
+    if(status != HAL_OK) return status;
+    // Combine bytes into 16-bit values (high byte first, then low byte)
+    *x = (int16_t)((buffer[0] << 8) | buffer[1]);
+    *y = (int16_t)((buffer[2] << 8) | buffer[3]);
+    *z = (int16_t)((buffer[4] << 8) | buffer[5]);
+    return HAL_OK;
+}       
+
 /**
  * @brief Read accelerometer data from MPU6500
  * @param x Pointer to store X-axis acceleration in g
@@ -317,9 +351,9 @@ HAL_StatusTypeDef MPU6500_ReadAccel(float *x, float *y, float *z){
     if(status != HAL_OK) return status;
     
     // Combine bytes into 16-bit values (high byte first, then low byte)
-    raw_x = (int16_t)((buffer[0] << 8) | buffer[1]);
-    raw_y = (int16_t)((buffer[2] << 8) | buffer[3]);
-    raw_z = (int16_t)((buffer[4] << 8) | buffer[5]);
+    raw_x = (int16_t)((buffer[0] << 8) | buffer[1]) - accel_offset[0];
+    raw_y = (int16_t)((buffer[2] << 8) | buffer[3]) - accel_offset[1];
+    raw_z = (int16_t)((buffer[4] << 8) | buffer[5]) - accel_offset[2];
     
     // Convert to physical units (g)
     *x = (float)raw_x / MPU6500_ACCEL_SENS;
@@ -348,9 +382,9 @@ HAL_StatusTypeDef MPU6500_ReadGyro(float *x, float *y, float *z){
     if(status != HAL_OK) return status;
     
     // Combine bytes into 16-bit values (high byte first, then low byte)
-    raw_x = (int16_t)((buffer[0] << 8) | buffer[1]);
-    raw_y = (int16_t)((buffer[2] << 8) | buffer[3]);
-    raw_z = (int16_t)((buffer[4] << 8) | buffer[5]);
+    raw_x = (int16_t)((buffer[0] << 8) | buffer[1]) - gyro_offset[0];
+    raw_y = (int16_t)((buffer[2] << 8) | buffer[3]) - gyro_offset[1];
+    raw_z = (int16_t)((buffer[4] << 8) | buffer[5]) - gyro_offset[2];
     
     // Convert to physical units (degrees per second)
     *x = (float)raw_x / MPU6500_GYRO_SENS;
@@ -414,4 +448,86 @@ HAL_StatusTypeDef MPU6500_WakeUp(void){
     regData &= ~(1 << 6);
     // Write back to PWR_MGMT_1
     return MPU6500_WriteRegister(PWR_MGMT_1, regData);
+}
+
+
+HAL_StatusTypeDef MPU6500_InitOffsetCalibration(uint32_t samples) {
+    HAL_StatusTypeDef status = HAL_OK;
+    int32_t accel_sum[3] = {0};
+    int32_t gyro_sum[3] = {0};
+    uint32_t i;
+    
+    // 验证参数有效性
+    if (samples == 0) {
+        return HAL_ERROR;
+    }
+    
+    // 确保传感器已初始化并处于活跃状态
+    status = MPU6500_WakeUp();
+    if (status != HAL_OK) {
+        return status;
+    }
+    
+    // 收集样本数据
+    for (i = 0; i < samples; i++) {
+        int16_t raw_accel[3];
+        int16_t raw_gyro[3];
+        
+        // 读取原始加速度计数据
+        status = MPU6500_ReadRawAccel(&raw_accel[0], &raw_accel[1], &raw_accel[2]);
+        if (status != HAL_OK) {
+            return status;
+        }
+        
+        // 读取原始陀螺仪数据
+        status = MPU6500_ReadRawGyro(&raw_gyro[0], &raw_gyro[1], &raw_gyro[2]);
+        if (status != HAL_OK) {
+            return status;
+        }
+        
+        // 累加数据（注意：对于Z轴加速度，我们期望它接近1g，所以需要减去1g的原始值）
+        accel_sum[0] += raw_accel[0];
+        accel_sum[1] += raw_accel[1];
+        accel_sum[2] += (raw_accel[2] - (int16_t)(1.0f * MPU6500_ACCEL_SENS));
+        
+        // 累加陀螺仪数据
+        gyro_sum[0] += raw_gyro[0];
+        gyro_sum[1] += raw_gyro[1];
+        gyro_sum[2] += raw_gyro[2];
+        
+        // 短暂延迟以确保采样均匀
+        HAL_Delay(5);
+    }
+    
+    // 计算平均偏移值
+    accel_offset[0] = (int16_t)(accel_sum[0] / samples);
+    accel_offset[1] = (int16_t)(accel_sum[1] / samples);
+    accel_offset[2] = (int16_t)(accel_sum[2] / samples);
+    
+    gyro_offset[0] = (int16_t)(gyro_sum[0] / samples);
+    gyro_offset[1] = (int16_t)(gyro_sum[1] / samples);
+    gyro_offset[2] = (int16_t)(gyro_sum[2] / samples);
+    
+    return HAL_OK;
+}
+
+/**
+ * @brief 打印MPU6500的偏移校准值
+ * @return HAL_StatusTypeDef HAL_OK on success, error on failure
+ * @note 此函数将打印加速度计和陀螺仪的偏移校准值到串口
+ */
+HAL_StatusTypeDef MPU6500_PrintOffsets(void) {
+    // 打印加速度计偏移值
+    printf("Accelerometer Offsets:\n");
+    printf("X: %d\n", accel_offset[0]);
+    printf("Y: %d\n", accel_offset[1]);
+    printf("Z: %d\n", accel_offset[2]);
+    
+    // 打印陀螺仪偏移值
+    printf("Gyroscope Offsets:\n");
+    printf("X: %d\n", gyro_offset[0]);
+    printf("Y: %d\n", gyro_offset[1]);
+    printf("Z: %d\n", gyro_offset[2]);
+    
+    return HAL_OK;
 }
